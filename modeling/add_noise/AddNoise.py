@@ -250,7 +250,7 @@ class AddNoise(nn.Module):
 
 
         image = torch.add(image , noise)
-        loss1 = self.caculateLoss1(image, text, mask, targets, Nonan_id)
+        # loss1 = self.caculateLoss1(image, text, mask, targets, Nonan_id)
 
 
         # imageB = torch.cat((ImageCls, ImageNoCls), dim=1)
