@@ -118,7 +118,7 @@ class CATSegPredictor(nn.Module):
         addNoise = AddNoise(
             prompt_channel=len(prompt_templates),
             image_channel=512,
-            appearance_guidance_dim=[appearance_guidance_dim,decoder_guidance_dims[0],decoder_guidance_dims[1]],
+            appearance_guidance_dims=[appearance_guidance_dim,decoder_guidance_dims[0],decoder_guidance_dims[1]],
         )
 
         self.addNoise = addNoise
@@ -170,7 +170,7 @@ class CATSegPredictor(nn.Module):
 
 
         if self.training:
-            x, text, loss,vis = self.addNoise(x, text, targets,vis)
+            x, text, vis,loss = self.addNoise(x, text, targets,vis)
             out = self.transformer(x, text, vis)
             # out = x
             return out, loss

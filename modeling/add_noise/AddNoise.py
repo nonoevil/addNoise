@@ -42,13 +42,24 @@ class AddNoise(nn.Module):
 
         self.conv = nn.ModuleList([
             nn.Sequential(
-                nn.Conv2d(image_channel, d, kernel_size=3, stride=1, padding=1),
+                nn.Conv2d(image_channel, appearance_guidance_dims[0], kernel_size=3, stride=1, padding=1),
                 nn.ReLU(),
-            ) for d in appearance_guidance_dims
+            ) ,
+            nn.Sequential(
+                nn.ConvTranspose2d(image_channel, appearance_guidance_dims[1], kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+            ),
+            nn.Sequential(
+                nn.ConvTranspose2d(image_channel, appearance_guidance_dims[1], kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+                nn.ConvTranspose2d(appearance_guidance_dims[1], appearance_guidance_dims[2], kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+            ),
         ])
 
-
-        # self.conv4 = nn.Conv2d(image_channel*2, image_channel, kernel_size=3, stride=1, padding=1)
+        self.upsample1 = nn.Upsample(size=(48, 48), mode='bilinear', align_corners=False)
+        self.upsample2 = nn.Upsample(size=(96, 96), mode='bilinear', align_corners=False)
+        # self.conv4 = nn.Conv2d(image_channel  *2, image_channel, kernel_size=3, stride=1, padding=1)
 
         # self.sumImage = torch.zeros((4,512,24,24), dtype=torch.float32, device="cuda:0")
         # self.sumText = torch.zeros((4,171,1,512), dtype=torch.float32, device="cuda:0")
