@@ -247,6 +247,8 @@ class SwinTransformerBlockWrapper(nn.Module):
         x = rearrange(x, 'B C T H W -> (B T) (H W) C')
         if appearance_guidance is not None:
             appearance_guidance = self.guidance_norm(repeat(appearance_guidance, 'B C H W -> (B T) (H W) C', T=T))
+
+
         x = self.block_1(x, appearance_guidance)
         x = self.block_2(x, appearance_guidance)
         x = rearrange(x, '(B T) (H W) C -> B C T H W', B=B, T=T, H=H, W=W)

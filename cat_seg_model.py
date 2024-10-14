@@ -151,10 +151,15 @@ class CATSeg(nn.Module):
 
         # CLIP ViT features for guidance
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
+        # (1,512, 24, 24)
         res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
         res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
         res4 = self.upsample1(res4)
+        # (1,256,48,48)
         res5 = self.upsample2(res5)
+        # (1, 128,96,96)
+
+
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
         targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
@@ -174,7 +179,7 @@ class CATSeg(nn.Module):
             
             loss = F.binary_cross_entropy_with_logits(outputs, _targets)
             loss += loss1
-            print(f"loss: {loss}")
+            # print(f"loss: {loss}")
             losses = {"loss_sem_seg" :  loss}
 
             return losses
@@ -194,6 +199,7 @@ class CATSeg(nn.Module):
     @torch.no_grad()
     def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):
         images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
+        targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
         stride = int(kernel * (1 - overlap))
         unfold = nn.Unfold(kernel_size=kernel, stride=stride)
         fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
@@ -214,7 +220,7 @@ class CATSeg(nn.Module):
         res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
 
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-        outputs = self.sem_seg_head(clip_features, features)
+        outputs = self.sem_seg_head(clip_features, features,targets)
 
         outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
         outputs = outputs.sigmoid()

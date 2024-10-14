@@ -15,13 +15,13 @@ class AddNoise(nn.Module):
             self,
             prompt_channel = 1,
             image_channel = 512,
-
+            appearance_guidance_dims = [512,256,128]
     ):
         # prompt_channel: Number of prompts for ensembling text features. Default: 1
         super().__init__()
 
         self.mean = 0.0  # 高斯噪声的均值
-        self.stddev = 0.005  # 高斯噪声的标准差
+        self.stddev = 0.0002  # 高斯噪声的标准差
         # self.cfg = cfg
         # self.addapter = nn.Sequential(
         #     nn.Conv2d(prompt_channel, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
@@ -40,10 +40,23 @@ class AddNoise(nn.Module):
             nn.ReLU(),
         )
 
+        self.conv = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(image_channel, d, kernel_size=3, stride=1, padding=1),
+                nn.ReLU(),
+            ) for d in appearance_guidance_dims
+        ])
+
+
         # self.conv4 = nn.Conv2d(image_channel*2, image_channel, kernel_size=3, stride=1, padding=1)
 
-        # self.nanClass = torch.zeros((2, 171), dtype=torch.float32, device="cuda:5")
-        self.times = 0
+        # self.sumImage = torch.zeros((4,512,24,24), dtype=torch.float32, device="cuda:0")
+        # self.sumText = torch.zeros((4,171,1,512), dtype=torch.float32, device="cuda:0")
+        # self.maxnI = -100
+        # self.maxnT = -100
+        # self.minnI = 100
+        # self.minnT = 100
+        # self.times = 0
 
     def nanId(self, mask,  targets):
         index = [
@@ -58,7 +71,7 @@ class AddNoise(nn.Module):
         nan_id = []
         Nonan_id = []
         for i in range(targets.shape[0]):
-            if (mask_class[i].item() != len(index[i])):
+            if (mask_class[i].item() != len(index[i])) or (len(index[i]) == 0):
                 nan_id.append((i))
             else:
                 Nonan_id.append(i)
@@ -145,15 +158,6 @@ class AddNoise(nn.Module):
         # (4, 171, 512)
         imageB = torch.mul(ImageCls , mask)
 
-        # print(mask)
-        # imageAvg = (ImageCls * mask).sum(dim=(3, 4)) / torch.add(mask.sum(dim=(3, 4)), 1e-5)
-
-        # print()
-
-
-
-        # (4, 171, 171)
-        # index = [torch.unique(targets[i])[:-1].long() for i in range(targets.shape[0])]
 
         index = [
             torch.unique(targets[i]).long() if torch.unique(targets[i]).long()[-1].item() != 255
@@ -174,37 +178,20 @@ class AddNoise(nn.Module):
             textB_i = textB[i]
             imageB_i = imageB[i, index[i]]
             mask_i = mask[i, index[i]]
-            # ( len(index[i], 512, 24, 24)
-
-
-
-            # print(f"imageB_i{imageB_i.shape}")
-            # print(f"textB_i{textB_i.shape}")
-            # print(f"mask_i{mask_i.shape}")
 
             imageAvg_i = (imageB_i).sum(dim=(2, 3)) / mask_i.sum(dim=(2, 3))
-            # print(f"imageAvg{imageAvg_i}")
             # ( len(index[i], 512, 24, 24) -> ( len(index[i], 512)
             cosine_i = F.cosine_similarity(imageAvg_i.unsqueeze(1), textB_i.unsqueeze(0), dim=2)
             diagonal_i = diagonal_tensor[index[i]]
-            # print(f"cosine_i{cosine_i}")
-            # print(f"diagonal_i{diagonal_i}")
-
             loss_i = F.binary_cross_entropy_with_logits(cosine_i, diagonal_i)
 
             mask_class = (mask[i].sum(dim=(1,2,3)) > 0.1)
             a = imageB_i.sum(dim=(1, 2, 3)).detach().cpu().numpy()
             c = mask_i.sum(dim=(1, 2, 3)).detach().cpu().numpy()
-            # print(f"imageB_i{a}")
+            #
             # print(f"mask_i{c}")
-            # print(f"index{index}")
-            # print(f"index_1{torch.unique(targets[i])}")
-            # print(f"mask.sum{mask[i].sum(dim=(1,2,3))}")
-            # print(f"mask_class{mask_class.sum(dim=0)}")
-
-            # if(math.isnan(loss_i)):
-            #     print(index[i])
-
+            # print(f"index{index[i]}")
+            # print(f"mask_all{mask[i].sum(dim=(1,2,3))}")
 
             loss += loss_i
 
@@ -225,7 +212,7 @@ class AddNoise(nn.Module):
         return loss
 
 
-    def AddNoiseToimage(self, noise, text, image, targets):
+    def AddNoiseToimage(self, noise, text, image, targets,vis_guidance):
         """
         Args:
             Arguments:
@@ -239,6 +226,9 @@ class AddNoise(nn.Module):
         """
 
         noise, mask, Nonan_id = self.NoiseToImage(image, noise, targets)
+
+        guidance_noises = [ conv(noise) for conv in self.conv ]
+        vis_guidance = [ torch.add(vis,guidance_noise) for vis,guidance_noise in zip(vis_guidance, guidance_noises) ]
 
         # ImageCls = self.GetImageCls(image)
         # ImageNoCls = self.GetImageNoCls(image)
@@ -257,11 +247,11 @@ class AddNoise(nn.Module):
         # imageB = self.conv4(image)
 
         # loss3 = self.caculateLoss3(image, imageB)
-        print(f"loss1 {loss1}")
+        # print(f"loss1 {loss1}")
         # print(f"loss2 {loss2}")
         # print(f"loss3 {loss3}")
 
-        return  image,loss1
+        return  image,vis_guidance,loss1
 
     def AddNoiseTotext(self, noise, text):
         return torch.add(noise, text)
@@ -290,7 +280,7 @@ class AddNoise(nn.Module):
         noise = torch.normal(self.mean, self.stddev, shape, device=device,dtype=torch.float32)
         return  noise
 
-    def forward(self,  image_features, text_features, targets):
+    def forward(self,  image_features, text_features, targets, vis_guidance):
         """
         h * w
         Args:
@@ -307,13 +297,30 @@ class AddNoise(nn.Module):
 
         image_features = F.normalize(image_features, dim=1)
         text_features = F.normalize(text_features, dim=1)
+        # print(image_features.device)
+        # print(torch.cuda.device_count())  # 可用的 GPU 数量
+        # print(torch.cuda.current_device())  # 当前使用的 GPU
+        # print(torch.cuda.get_device_name(0))  # 当前 GPU 的名称
+        #
+        # self.times += 1
+        # self.sumImage += image_features
+        # self.sumText += text_features
+        # self.maxnI = max(torch.max(image_features).item(), self.maxnI)
+        # self.maxnT = max(torch.max(text_features).item(), self.maxnT)
+        # self.minnI = min(torch.min(image_features).item(), self.minnI)
+        # self.minnT = min(torch.min(text_features).item(), self.minnT)
+        #
+        #
+        # print(f"imagemax: {self.maxnI} min: {self.minnI} mean {self.sumImage.mean().item()/self.times} ")
+        # print(f"textmax: {self.maxnT} min: {self.minnT} mean {self.sumText.mean().item()/self.times} ")
+        # print("\n")
 
         # Ori_corr = self.correlation(image_features, text_features)
         #
 
         text_noise = self.getnoise(text_features.shape, image_features.device) # B T P C
 
-        image_features,loss = self.AddNoiseToimage(text_noise, text_features, image_features, targets)
+        image_features,vis_guidance,loss = self.AddNoiseToimage(text_noise, text_features, image_features, targets,vis_guidance)
         image_features = F.normalize(image_features, dim=1)
 
         text_features  = self.AddNoiseTotext(text_noise,  text_features)
@@ -330,7 +337,7 @@ class AddNoise(nn.Module):
         # print(f"text_features: {text_features}")
 
 
-        return image_features, text_features, loss
+        return image_features, text_features, vis_guidance,loss
 
 
 
