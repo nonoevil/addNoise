@@ -158,10 +158,11 @@ class CATSegPredictor(nn.Module):
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
-        
+
         text = text.repeat(x.shape[0], 1, 1, 1)
-        print(f"text{text.shape}")
-        text = torch.add(text, text_noise)
+        # print(f"text{text.shape}")
+        if text_noise is not None:
+            text = torch.add(text, text_noise)
 
         return self.transformer(x, text, vis)
 

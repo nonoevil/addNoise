@@ -155,8 +155,8 @@ class CATSeg(nn.Module):
         targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
         image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
 
-        print(f"image_noise{image_noise.shape}")
-        print(f"text_noise{text_noise.shape}")
+        # print(f"image_noise{image_noise.shape}")
+        # print(f"text_noise{text_noise.shape}")
 
         self.layers = []
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
@@ -177,7 +177,7 @@ class CATSeg(nn.Module):
 
         if self.training:
 
-            outputs = self.sem_seg_head(clip_features, features, text_noise)
+            outputs = self.sem_seg_head(clip_features, features,text_noise=text_noise)
 
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)
 

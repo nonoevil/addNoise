@@ -27,7 +27,7 @@ class AddNoise(nn.Module):
         #     nn.Conv2d(prompt_channel, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
         #     nn.ReLU(),
         # )
-        self.mse_loss = nn.MSELoss()
+        # self.mse_loss = nn.MSELoss()
         # self.GetImageCls = nn.Conv2d(image_channel, image_channel, kernel_size=3, stride=1, padding=1)
         # self.GetImageNoCls = nn.Conv2d(image_channel, image_channel, kernel_size=3, stride=1, padding=1)
         self.Conv1NoiseToImage = nn.Sequential(
@@ -57,8 +57,8 @@ class AddNoise(nn.Module):
         #     ),
         # ])
 
-        self.upsample1 = nn.Upsample(size=(48, 48), mode='bilinear', align_corners=False)
-        self.upsample2 = nn.Upsample(size=(96, 96), mode='bilinear', align_corners=False)
+        # self.upsample1 = nn.Upsample(size=(48, 48), mode='bilinear', align_corners=False)
+        # self.upsample2 = nn.Upsample(size=(96, 96), mode='bilinear', align_corners=False)
         # self.conv4 = nn.Conv2d(image_channel  *2, image_channel, kernel_size=3, stride=1, padding=1)
 
         # self.sumImage = torch.zeros((4,512,24,24), dtype=torch.float32, device="cuda:0")
@@ -93,6 +93,7 @@ class AddNoise(nn.Module):
             Nonan_id.remove(selected_number)
         # print(f"nan_id{nan_id}")
         # print(f"Nonan_id{Nonan_id}")
+        del index ,mask_class
         return nan_id,Nonan_id
 
     def NoiseToImage(self, image_shape, noise, targets, device):
@@ -148,8 +149,7 @@ class AddNoise(nn.Module):
 
             for id in nan_id:
                 noise[id] = torch.mul(zero_tensor, noise[id])
-
-            return noise
+            return noise.permute(2,0,1)
 
     def caculateNan(self,index, mask):
         for i in range(len(index)):

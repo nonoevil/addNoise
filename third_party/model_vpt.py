@@ -200,12 +200,13 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
-    def forward(self, x: torch.Tensor, prompt=None):
+    def forward(self, x: torch.Tensor, prompt=None,noise=None):
         x = x + self.attention(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         if prompt is not None:
             x = torch.cat((x[0:1, :, :], x[prompt + 1: :, :]), dim=0)
-        # print(x.shape)
+        if noise is not None:
+            x = torch.add(x, noise)
         return x
 
     def forward_dense(self, x: torch.Tensor, prompt=None):
@@ -253,8 +254,9 @@ class Transformer(nn.Module):
             # print(i)
             if i == 3:
                 if noise is not None:
-                    x = torch.add(x, noise)
-                x = resblock(x, self.prompt_length)
+                    x = resblock(x, self.prompt_length,noise=noise)
+                else :
+                    x = resblock(x, self.prompt_length)
             elif i == self.layers - 1 and dense:
                 x = resblock.forward_dense(x, self.prompt_length)    
             else:
@@ -297,7 +299,7 @@ class VisualTransformer(nn.Module):
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         if noise is not None:
-            x = self.transformer(x, dense,noise)
+            x = self.transformer(x, dense,noise=noise)
         else:
             x = self.transformer(x, dense)
         x = x.permute(1, 0, 2)  # LND -> NLD
