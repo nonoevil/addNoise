@@ -115,13 +115,7 @@ class CATSegPredictor(nn.Module):
             prompt_channel=len(prompt_templates),
             )
 
-        addNoise = AddNoise(
-            prompt_channel=len(prompt_templates),
-            image_channel=512,
-            appearance_guidance_dims=[appearance_guidance_dim,decoder_guidance_dims[0],decoder_guidance_dims[1]],
-        )
 
-        self.addNoise = addNoise
         self.transformer = transformer
         
         self.tokens = None
@@ -159,27 +153,17 @@ class CATSegPredictor(nn.Module):
 
         return ret
 
-    def forward(self, x, vis_guidance, targets,prompt=None, gt_cls=None):
+    def forward(self, x, vis_guidance, text_noise=None,prompt=None, gt_cls=None ):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
         text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
         
         text = text.repeat(x.shape[0], 1, 1, 1)
+        print(f"text{text.shape}")
+        text = torch.add(text, text_noise)
 
-
-
-        if self.training:
-            x, text, vis,loss = self.addNoise(x, text, targets,vis)
-            out = self.transformer(x, text, vis)
-            # out = x
-            return out, loss
-        else:
-            out = self.transformer(x, text, vis)
-            return out
-
-        # out = self.transformer(x, text, vis)
-        # return out,0
+        return self.transformer(x, text, vis)
 
     @torch.no_grad()
     def class_embeddings(self, classnames, templates, clip_model):

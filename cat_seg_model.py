@@ -14,6 +14,7 @@ from detectron2.structures import ImageList
 from detectron2.utils.memory import _ignore_torch_cuda_oom
 
 from einops import rearrange
+from .modeling.add_noise.AddNoise import AddNoise
 
 @META_ARCH_REGISTRY.register()
 class CATSeg(nn.Module):
@@ -87,6 +88,12 @@ class CATSeg(nn.Module):
         for l in self.layer_indexes:
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
 
+        addNoise = AddNoise(
+            image_channel=512,
+            appearance_guidance_dims=[512, 256, 128],
+        )
+
+        self.addNoise = addNoise
 
     @classmethod
     def from_config(cls, cfg):
@@ -142,13 +149,20 @@ class CATSeg(nn.Module):
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
 
-        self.layers = []
 
+        text_shape = (clip_images.tensor.shape[0],171,1 ,512)
+        image_shape = (clip_images.tensor.shape[0],768,577)
+        targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
+        image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
+
+        print(f"image_noise{image_noise.shape}")
+        print(f"text_noise{text_noise.shape}")
+
+        self.layers = []
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
+        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True,noise=image_noise)
 
         image_features = clip_features[:, 1:, :]
-
         # CLIP ViT features for guidance
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         # (1,512, 24, 24)
@@ -158,17 +172,15 @@ class CATSeg(nn.Module):
         # (1,256,48,48)
         res5 = self.upsample2(res5)
         # (1, 128,96,96)
-
-
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
-        targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
+
         if self.training:
 
-            outputs,loss1 = self.sem_seg_head(clip_features, features,targets)
+            outputs = self.sem_seg_head(clip_features, features, text_noise)
 
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)
-            
+
             num_classes = outputs.shape[1]
             mask = targets != self.sem_seg_head.ignore_value
 
@@ -176,24 +188,23 @@ class CATSeg(nn.Module):
             _targets = torch.zeros(outputs.shape, device=self.device)
             _onehot = F.one_hot(targets[mask], num_classes=num_classes).float()
             _targets[mask] = _onehot
-            
+
             loss = F.binary_cross_entropy_with_logits(outputs, _targets)
-            loss += loss1
             # print(f"loss: {loss}")
             losses = {"loss_sem_seg" :  loss}
 
             return losses
-
-        else:
-            outputs = self.sem_seg_head(clip_features, features,targets)
-            outputs = outputs.sigmoid()
-            image_size = clip_images.image_sizes[0]
-            height = batched_inputs[0].get("height", image_size[0])
-            width = batched_inputs[0].get("width", image_size[1])
-
-            output = sem_seg_postprocess(outputs[0], image_size, height, width)
-            processed_results = [{'sem_seg': output}]
-            return processed_results
+        #
+        # else:
+        #     outputs = self.sem_seg_head(clip_features, features,targets)
+        #     outputs = outputs.sigmoid()
+        #     image_size = clip_images.image_sizes[0]
+        #     height = batched_inputs[0].get("height", image_size[0])
+        #     width = batched_inputs[0].get("width", image_size[1])
+        #
+        #     output = sem_seg_postprocess(outputs[0], image_size, height, width)
+        #     processed_results = [{'sem_seg': output}]
+        #     return processed_results
 
 
     @torch.no_grad()
