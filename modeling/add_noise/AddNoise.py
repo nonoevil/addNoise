@@ -21,7 +21,7 @@ class AddNoise(nn.Module):
         super().__init__()
 
         self.mean = 0.0  # 高斯噪声的均值
-        self.stddev = 0.00002  # 高斯噪声的标准差
+        self.stddev = 0.0005  # 高斯噪声的标准差
         # self.cfg = cfg
         # self.addapter = nn.Sequential(
         #     nn.Conv2d(prompt_channel, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
@@ -30,16 +30,15 @@ class AddNoise(nn.Module):
         # self.mse_loss = nn.MSELoss()
         # self.GetImageCls = nn.Conv2d(image_channel, image_channel, kernel_size=3, stride=1, padding=1)
         # self.GetImageNoCls = nn.Conv2d(image_channel, image_channel, kernel_size=3, stride=1, padding=1)
-        self.Conv1NoiseToImage = nn.Sequential(
-            nn.Conv2d(image_channel, 768, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+        self.Conv1NoiseToText = nn.Sequential(
+            nn.Conv2d(image_channel, 512, kernel_size=3, stride=1, padding=1),
+            nn.AdaptiveAvgPool2d((6, 6)),
         )
 
-        self.Conv2NoiseToImage = nn.Sequential(
-            nn.Conv2d(768, 768, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+        self.Conv2NoiseToText = nn.Sequential(
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            nn.AdaptiveAvgPool2d((1, 1)),
         )
-
         # self.conv = nn.ModuleList([
         #     nn.Sequential(
         #         nn.Conv2d(image_channel, appearance_guidance_dims[0], kernel_size=3, stride=1, padding=1),
@@ -96,61 +95,46 @@ class AddNoise(nn.Module):
         del index ,mask_class
         return nan_id,Nonan_id
 
-    def NoiseToImage(self, image_shape, noise, targets, device):
-            """
-                Args:
-                    image (Tensor): Input image of shape (B, C, H, W).
-                    noise (Tensor): Noise image of shape (B, T, P, C). (4,171, 1, 512)
-                Returns:
-                    noise (B,C,H,W)
-                    mask (B,T,C,H,W)
-                    Nonanid  list (B,)
-            """
-            shape = (0,1,24,24)
-            targets = targets.float()
-            mask = F.interpolate(targets.unsqueeze(1), size=(24, 24), mode='nearest')
-            #
-            mask = mask.long()
-            # (4, 24, 24)
+
+    def NoiseToText(self, text_shape, noise, targets, device):
+        """
+                        Args:
+                            text_shape : (4,171, 1, 512)
+                            noise (Tensor): Noise image of shape (B, T, P, C). (4,768, 577)
+                        Returns:
+                            noise (B,C,H,W)
+                            mask (B,T,C,H,W)
+                            Nonanid  list (B,)
+                    """
+        targets = targets.float()
+        mask = F.interpolate(targets.unsqueeze(1), size=(24, 24), mode='nearest')
+        #
+        mask = mask.long()
+        # (4, 24, 24)
+
+        # (4, 1, 24, 24)
+        new_mask = torch.zeros((targets.shape[0], 256, 24, 24), device=device)
+        new_mask.scatter_(1, mask, 1)
+        # (4, 256, 24, 24)
+        new_mask = new_mask[:, :171, :, :]
+
+        new_mask = new_mask.unsqueeze(2).repeat(1, 1, noise.shape[1], 1, 1)
+        # (4, 171, 768, 24, 24)
+        noise = rearrange(noise[:, :, 1:], "B C (H W) -> B C H W", H=24)
+        # (4, 768, 24, 24)
+        noise = noise.unsqueeze(1).repeat(1, new_mask.shape[1], 1, 1, 1)
+        # (4, 171, 768, 24, 24)
 
 
-            # (4, 1, 24, 24)
-            new_mask = torch.zeros((targets.shape[0], 256, 24, 24),  device=device)
-            new_mask.scatter_(1, mask, 1)
-            # (4, 256, 24, 24)
-            new_mask = new_mask[:, :171, :, :]
 
-            new_mask = new_mask.unsqueeze(2).repeat(1, 1, image_shape[1], 1, 1)
-            # (4, 171, 768, 24, 24)
-
-            # (4,171, 1,512) -> (4,577,768)
-
-            noise = noise.permute(0, 1, 3, 2).unsqueeze(4)
-            # (4, 171, 1, 512) -> (4, 171, 512, 1, 1)
-            noise = noise.view(-1, 512, 1, 1)  # 变为 (4 * 171, 768, 1, 1)
-            noise = F.interpolate(noise, size=(12, 12), mode='bilinear',align_corners=False)
-            # (4 171, 512, 1, 1) -> (4 171, 512, 12, 12)
-            noise = self.Conv1NoiseToImage(noise)
-            # (4171, 512, 512, 12) -> (4 171, 768, 12, 12)
-            noise = F.interpolate(noise, size=(24, 24), mode='bilinear', align_corners=False)
-            # (4 171, 768, 12, 12) -> (4 171, 768, 24, 24)
-            noise = self.Conv2NoiseToImage(noise)
-            # (4,171, 768, 24, 24) -> (4 171, 768, 24, 24)
-
-            noise = noise.view(targets.shape[0], 171, image_shape[1], 24, 24)
-            noise = torch.mul(noise, new_mask)
-            noise = noise.sum(dim=1)
-            # (4, 768, 24, 24)
-            noise = rearrange(noise, "B C H W -> B C (H W)")
-            noise = F.interpolate(noise.unsqueeze(2), size=(1,577), mode='bilinear',).squeeze(2)
-            # (4, 768 ,577)
-            nan_id, Nonan_id = self.nanId(new_mask, targets)
-            zero_tensor = torch.zeros((image_shape[1], image_shape[2]), device=device)
-
-            for id in nan_id:
-                noise[id] = torch.mul(zero_tensor, noise[id])
-            return noise.permute(2,0,1)
-
+        noise = torch.mul(noise, new_mask)
+        noise = noise.view(-1, 768,24,24)
+        #     (4 171, 768, 24, 24)
+        noise = self.Conv1NoiseToText(noise)
+        noise = self.Conv2NoiseToText(noise)
+        #     (4,171, 512, 1, 1)
+        noise = noise.view(text_shape)
+        return noise
     def caculateNan(self,index, mask):
         for i in range(len(index)):
             for j in range(len(index[i])):
@@ -162,6 +146,8 @@ class AddNoise(nn.Module):
 
     def getnoise(self, shape, device):
         noise = torch.normal(self.mean, self.stddev, shape, device=device,dtype=torch.float32)
+
+
         return  noise
 
     def forward(self,  image_shape, text_shape, targets, device):
@@ -181,10 +167,11 @@ class AddNoise(nn.Module):
         # Ori_corr = self.correlation(image_features, text_features)
         #
 
-        text_noise = self.getnoise(text_shape, device) # B T P C
+        image_noise = self.getnoise(image_shape, device) # B T P C
 
-        image_noise = self.NoiseToImage(image_shape,text_noise, targets, device)
+        text_noise = self.NoiseToText(text_shape,image_noise, targets, device)
 
+        image_noise = image_noise.permute(2,0,1)
 
 
         # Now_corr = self.correlation(image_features,text_features)

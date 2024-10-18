@@ -89,7 +89,7 @@ class CATSeg(nn.Module):
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
 
         addNoise = AddNoise(
-            image_channel=512,
+            image_channel=768,
             appearance_guidance_dims=[512, 256, 128],
         )
 
@@ -149,18 +149,30 @@ class CATSeg(nn.Module):
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
 
+        self.layers = []
+        clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear',
+                                            align_corners=False, )
 
-        text_shape = (clip_images.tensor.shape[0],171,1 ,512)
-        image_shape = (clip_images.tensor.shape[0],768,577)
-        targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
-        image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
 
+
+        if self.training:
+            text_shape = (clip_images.tensor.shape[0],171,1 ,512)
+            image_shape = (clip_images.tensor.shape[0],768,577)
+
+            targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
+            image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
+            # print(f"image_noise: {image_noise.shape}")
+            # print(f"text_noise: {text_noise.shape}")
+            clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True,
+                                                                                noise=image_noise)
+        else:
+            clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
         # print(f"image_noise{image_noise.shape}")
         # print(f"text_noise{text_noise.shape}")
 
-        self.layers = []
-        clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear', align_corners=False, )
-        clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True,noise=image_noise)
+
+
+
 
         image_features = clip_features[:, 1:, :]
         # CLIP ViT features for guidance
@@ -194,23 +206,23 @@ class CATSeg(nn.Module):
             losses = {"loss_sem_seg" :  loss}
 
             return losses
-        #
-        # else:
-        #     outputs = self.sem_seg_head(clip_features, features,targets)
-        #     outputs = outputs.sigmoid()
-        #     image_size = clip_images.image_sizes[0]
-        #     height = batched_inputs[0].get("height", image_size[0])
-        #     width = batched_inputs[0].get("width", image_size[1])
-        #
-        #     output = sem_seg_postprocess(outputs[0], image_size, height, width)
-        #     processed_results = [{'sem_seg': output}]
-        #     return processed_results
+
+        else:
+            outputs = self.sem_seg_head(clip_features, features)
+            outputs = outputs.sigmoid()
+            image_size = clip_images.image_sizes[0]
+            height = batched_inputs[0].get("height", image_size[0])
+            width = batched_inputs[0].get("width", image_size[1])
+
+            output = sem_seg_postprocess(outputs[0], image_size, height, width)
+            processed_results = [{'sem_seg': output}]
+            return processed_results
 
 
     @torch.no_grad()
     def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):
         images = [x["image"].to(self.device, dtype=torch.float32) for x in batched_inputs]
-        targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
+
         stride = int(kernel * (1 - overlap))
         unfold = nn.Unfold(kernel_size=kernel, stride=stride)
         fold = nn.Fold(out_res, kernel_size=kernel, stride=stride)
@@ -231,7 +243,7 @@ class CATSeg(nn.Module):
         res5 = self.upsample2(rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24))
 
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
-        outputs = self.sem_seg_head(clip_features, features,targets)
+        outputs = self.sem_seg_head(clip_features, features)
 
         outputs = F.interpolate(outputs, size=kernel, mode="bilinear", align_corners=False)
         outputs = outputs.sigmoid()
