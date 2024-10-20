@@ -157,12 +157,15 @@ class CATSegPredictor(nn.Module):
         vis = [vis_guidance[k] for k in vis_guidance.keys()][::-1]
         text = self.class_texts if self.training else self.test_class_texts
         text = [text[c] for c in gt_cls] if gt_cls is not None else text
-        text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt)
 
-        text = text.repeat(x.shape[0], 1, 1, 1)
-        # print(f"text{text.shape}")
         if text_noise is not None:
-            text = torch.add(text, text_noise)
+            text = torch.stack([self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt,noise) for  noise in text_noise])
+
+        else:
+            text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt )
+            text = text.repeat(x.shape[0], 1, 1, 1)
+
+
 
         return self.transformer(x, text, vis)
 
@@ -192,10 +195,10 @@ class CATSegPredictor(nn.Module):
         zeroshot_weights = torch.stack(zeroshot_weights, dim=1).cuda()
         return zeroshot_weights
     
-    def get_text_embeds(self, classnames, templates, clip_model, prompt=None):
+    def get_text_embeds(self, classnames, templates, clip_model, prompt=None, noise=None):
         if self.cache is not None and not self.training:
             return self.cache
-        
+
         if self.tokens is None or prompt is not None:
             tokens = []
             for classname in classnames:
@@ -215,7 +218,8 @@ class CATSegPredictor(nn.Module):
         elif self.tokens is not None and prompt is None:
             tokens = self.tokens
 
-        class_embeddings = clip_model.encode_text(tokens, prompt)
+
+        class_embeddings = clip_model.encode_text(tokens, prompt,noise)
         class_embeddings = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
         
         

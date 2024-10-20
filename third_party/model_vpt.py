@@ -251,7 +251,7 @@ class Transformer(nn.Module):
         for i, resblock in enumerate(self.resblocks):
             if self.prompt_length > 0 and i < self.prompt_depth:
                 x = torch.cat((x[0:1, :, :], self.prompt_tokens[i].repeat(x.shape[1], 1, 1).permute(1, 0, 2) ,x[1:, :, :]))
-            # print(i)
+
             if i == 3:
                 if noise is not None:
                     x = resblock(x, self.prompt_length,noise=noise)
@@ -418,7 +418,7 @@ class CLIP(nn.Module):
         else:
             return self.visual(image.type(self.dtype), masks.type(self.dtype))
 
-    def encode_text(self, text, prompt=None):
+    def encode_text(self, text, prompt=None, noise=None):
         #if prompt is not None:
         #import pdb; pdb.set_trace()
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
@@ -427,8 +427,11 @@ class CLIP(nn.Module):
 
         x = x + self.positional_embedding.type(self.dtype)
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x, prompt=prompt)
+
+        x = self.transformer(x, prompt=prompt, noise=noise)
+
         x = x.permute(1, 0, 2)  # LND -> NLD
+
         x = self.ln_final(x).type(self.dtype)
 
         # x.shape = [batch_size, n_ctx, transformer.width]

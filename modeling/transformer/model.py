@@ -612,7 +612,7 @@ class Aggregator(nn.Module):
             ) for _ in range(num_layers)
         ])
 
-        self.conv1 = nn.Conv2d(prompt_channel, hidden_dim, kernel_size=7, stride=1, padding=3)
+        self.conv1 = nn.Conv2d(prompt_channel,  hidden_dim, kernel_size=7, stride=1, padding=3)
 
         self.guidance_projection = nn.Sequential(
             nn.Conv2d(appearance_guidance_dim, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),

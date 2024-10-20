@@ -163,6 +163,7 @@ class CATSeg(nn.Module):
             image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
             # print(f"image_noise: {image_noise.shape}")
             # print(f"text_noise: {text_noise.shape}")
+
             clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True,
                                                                                 noise=image_noise)
         else:
@@ -206,7 +207,6 @@ class CATSeg(nn.Module):
             losses = {"loss_sem_seg" :  loss}
 
             return losses
-
         else:
             outputs = self.sem_seg_head(clip_features, features)
             outputs = outputs.sigmoid()

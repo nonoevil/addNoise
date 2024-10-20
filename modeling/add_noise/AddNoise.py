@@ -39,6 +39,7 @@ class AddNoise(nn.Module):
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
             nn.AdaptiveAvgPool2d((1, 1)),
         )
+        self.Con3 = nn.Conv2d(in_channels=1, out_channels=77, kernel_size=(1, 1))
         # self.conv = nn.ModuleList([
         #     nn.Sequential(
         #         nn.Conv2d(image_channel, appearance_guidance_dims[0], kernel_size=3, stride=1, padding=1),
@@ -134,6 +135,10 @@ class AddNoise(nn.Module):
         noise = self.Conv2NoiseToText(noise)
         #     (4,171, 512, 1, 1)
         noise = noise.view(text_shape)
+        #  (4, 171, 1, 512)
+        noise = self.Con3(noise.permute(0, 2, 1, 3))
+        # 4, 77, 171, 512
+        del targets, mask, new_mask
         return noise
     def caculateNan(self,index, mask):
         for i in range(len(index)):
