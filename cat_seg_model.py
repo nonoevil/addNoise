@@ -89,7 +89,7 @@ class CATSeg(nn.Module):
             self.sem_seg_head.predictor.clip_model.visual.transformer.resblocks[l].register_forward_hook(lambda m, _, o: self.layers.append(o))
 
         addNoise = AddNoise(
-            image_channel=768,
+            image_channel=512,
             appearance_guidance_dims=[512, 256, 128],
         )
 
@@ -156,11 +156,12 @@ class CATSeg(nn.Module):
 
 
         if self.training:
-            text_shape = (clip_images.tensor.shape[0],171,1 ,512)
+            text_shape = (clip_images.tensor.shape[0],171 ,77,512)
             image_shape = (clip_images.tensor.shape[0],768,577)
 
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
+            text_noise = text_noise.permute(0,2,1,3)
             # print(f"image_noise: {image_noise.shape}")
             # print(f"text_noise: {text_noise.shape}")
 
@@ -201,7 +202,6 @@ class CATSeg(nn.Module):
             _targets = torch.zeros(outputs.shape, device=self.device)
             _onehot = F.one_hot(targets[mask], num_classes=num_classes).float()
             _targets[mask] = _onehot
-
             loss = F.binary_cross_entropy_with_logits(outputs, _targets)
             # print(f"loss: {loss}")
             losses = {"loss_sem_seg" :  loss}
