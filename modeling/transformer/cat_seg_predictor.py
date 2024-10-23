@@ -165,10 +165,11 @@ class CATSegPredictor(nn.Module):
             textB = textB.repeat(1, 1, 1, 1)
             text = torch.cat((textA, textB), dim=0)
             #
-            # print(f"image{x.shape}")
-            # print(f"text{text.shape}")
-            loss = self.loss1(x, text, targets)
-            return self.transformer(x, text, vis),loss
+            # print(f"image{x[0] - x[1]}")
+            # print(f"text{text[0] - text[1]}")
+            self.loss1(x, text, targets)
+            loss1 = 0
+            return self.transformer(x, text, vis),loss1
         else:
             text = self.get_text_embeds(text, self.prompt_templates, self.clip_model, prompt )
             text = text.repeat(x.shape[0], 1, 1, 1)
@@ -176,58 +177,62 @@ class CATSegPredictor(nn.Module):
 
 
 
-
     def loss1(self, image, text,  targets):
-        image = image.unsqueeze(1).expand(-1, text.shape[1], -1, -1, -1)
+        image= image.unsqueeze(1).expand(-1, text.shape[1], -1, -1, -1)
         # (4, 171, 512, 24, 24)
 
-        text = text.permute(0, 1, 3, 2)
-        #     (4, 171, 1 512) -> (4, 171, 512, 1)
+        print(f"")
         mask = self.get_mask(targets, image.shape, image.device)
-        index = self.mask_index(mask, targets)
+        print(f"mask{mask.shape}")
+        nan_id, Nonan_id = self.nanId(mask, targets)
+
+        textB = text.squeeze(2)
+        # (4, 171, 512)
+        imageB = torch.mul(image , mask)
+
+        # print(mask)
+        # imageAvg = (ImageCls * mask).sum(dim=(3, 4)) / torch.add(mask.sum(dim=(3, 4)), 1e-5)
+
+        # print()
 
 
-        # print(f"mask{mask.shape}")
-        # print(f"image{image.shape}")
-        # print(f"text{text.shape}")
-        image = torch.mul(image, mask)
 
+        # (4, 171, 171)
+        # index = [torch.unique(targets[i])[:-1].long() for i in range(targets.shape[0])]
 
+        index = [
+            torch.unique(targets[i]).long() if torch.unique(targets[i]).long()[-1].item() != 255
+            else torch.unique(targets[i])[:-1].long()
+            for i in range(targets.shape[0])
+        ]
+        # self.caculateNan(index, mask.sum(dim=(2,3,4)))
 
         loss = 0
-        gt = torch.tensor([[[1, 0]] * 171,[[1, 0]] * 171], device = image.device, dtype=torch.float32)
-        mid = len(index)//2
-        for i in range(mid):
-            if len(index[i]) != 0:
-                text_noise = text[i,index[i]]
-                text_ = text[i+mid, index[i]]
-                text_i = torch.cat((text_noise, text_), dim=2)
-                # (171, 512, 2)
+        diagonal_tensor = torch.eye(text.shape[1], device=text.device)
+        # mask=mask.sum(dim=(2, 3, 4))
+        # print(f"mask{mask}")
+        for i in  Nonan_id:
+            # print(f"i{i}")
+            # print(f"index_i{index[i]}")
+            # print(f"mask_i{mask[i, index[i]]}")
 
-                loss1 = self.Caculate(image[i, index[i]], text_i, mask[i, index[i]],gt[0,index[i]])
-                loss2 = self.Caculate(image[i+mid,index[i]], text_i,mask[i+mid,index[i]] ,gt[1,index[i]])
-                loss += loss1 + loss2
-            #
-        return loss
+            textB_i = textB[i,index[i]]
+            imageB_i = imageB[i, index[i]]
+            mask_i = mask[i, index[i]]
 
-    def Caculate(self, image, text, mask, gt):
+            imageAvg_i = (imageB_i).sum(dim=(2, 3)) / mask_i.sum(dim=(2, 3))
 
-        if mask.sum(dim=(0,1,2,3)) == 0 :
-            return 0
+            textB_i= F.normalize(textB_i)
+            imageAvg_i = F.normalize(imageAvg_i)
 
-        imageAvg_i = image.sum(dim=(2, 3)) / mask.sum(dim=(2, 3))
-        imageAvg_i = imageAvg_i.unsqueeze(2)
-        # (171, 512, 1)
-        text_i = F.normalize(text)
-        imageAvg_i = F.normalize(imageAvg_i)
-        # print(f"imageB{imageB.shape}")
+            print(f"textB_i: {textB_i.shape}")
+            print(f"imageB_i: {imageAvg_i.shape}")
 
-        # print(f"index{index[i]}")
+            cosine_i = F.cosine_similarity(imageAvg_i, textB_i)
+            # diagonal_i = diagonal_tensor[index[i]]
 
-        cosine_i = F.cosine_similarity(imageAvg_i, text_i, dim=1)
-        # (171, 2)
-        loss = F.binary_cross_entropy_with_logits(cosine_i, gt)
-        return loss
+            print(f"cosine_i{cosine_i}")
+            # print(f"diagonal_i{diagonal_i}")
 
     def get_mask(self,targets,image_shape, device):
         targets = targets.float()
@@ -245,14 +250,25 @@ class CATSegPredictor(nn.Module):
         new_mask = new_mask.unsqueeze(2).repeat(1, 1, image_shape[2], 1, 1)
         # (4, 171, 512, 24, 24)
         return new_mask
-    def mask_index(self, mask,  targets):
-        mask_class = mask.sum(dim=(2, 3, 4))  > 0.1
-        mask_index = []
-        for i in range(mask_class.shape[0]):
-            idx = torch.nonzero(mask_class[i] == True)
-            idx = idx.squeeze(1)
-            mask_index.append(idx)
-        return mask_index
+    def nanId(self, mask,  targets):
+        index = [
+            torch.unique(targets[i]).long() if torch.unique(targets[i]).long()[-1].item() != 255
+            else torch.unique(targets[i])[:-1].long()
+            for i in range(targets.shape[0])
+        ]
+
+        mask_class = mask.sum(dim=(2, 3, 4))
+        mask_class = (mask_class > 0.1).sum(dim=1)
+
+        nan_id = []
+        Nonan_id = []
+        for i in range(targets.shape[0]):
+            if (mask_class[i].item() != len(index[i])) or (len(index[i]) == 0):
+                nan_id.append((i))
+            else:
+                Nonan_id.append(i)
+
+        return nan_id,Nonan_id
     @torch.no_grad()
     def class_embeddings(self, classnames, templates, clip_model):
         zeroshot_weights = []

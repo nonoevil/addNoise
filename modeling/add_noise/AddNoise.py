@@ -21,7 +21,7 @@ class AddNoise(nn.Module):
         super().__init__()
 
         self.mean = 0.0  # 高斯噪声的均值
-        self.stddev = 0.1  # 高斯噪声的标准差
+        self.stddev = 0.0005  # 高斯噪声的标准差
         # self.cfg = cfg
         # self.addapter = nn.Sequential(
         #     nn.Conv2d(prompt_channel, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
@@ -40,9 +40,7 @@ class AddNoise(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.Con3 = nn.Conv2d(in_channels=1, out_channels=77, kernel_size=(1, 1))
-        self.ConvNoiseToImage = nn.Sequential(
-            nn.Conv1d(in_channels=768, out_channels=768, kernel_size=3, padding=1)
-        )
+
         # self.conv = nn.ModuleList([
         #     nn.Sequential(
         #         nn.Conv2d(image_channel, appearance_guidance_dims[0], kernel_size=3, stride=1, padding=1),
@@ -145,8 +143,7 @@ class AddNoise(nn.Module):
         return noise
 
     def NoiseToImage(self, noise ):
-        image_noise = self.ConvNoiseToImage
-        return image_noise(noise)
+        return noise
 
     def getnoise(self, shape, device):
         noise = torch.normal(self.mean, self.stddev, shape, device=device,dtype=torch.float32)
