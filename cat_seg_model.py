@@ -15,7 +15,7 @@ from detectron2.utils.memory import _ignore_torch_cuda_oom
 
 from einops import rearrange
 from .modeling.add_noise.AddNoise import AddNoise
-
+import random
 @META_ARCH_REGISTRY.register()
 class CATSeg(nn.Module):
     @configurable
@@ -149,7 +149,7 @@ class CATSeg(nn.Module):
         clip_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         clip_images = ImageList.from_tensors(clip_images, self.size_divisibility)
 
-        self.layers = []
+
         clip_images_resized = F.interpolate(clip_images.tensor, size=self.clip_resolution, mode='bilinear',
                                             align_corners=False, )
 
@@ -161,13 +161,30 @@ class CATSeg(nn.Module):
 
             targets = torch.stack([x["sem_seg"].to(self.device) for x in batched_inputs], dim=0)
             image_noise,text_noise = self.addNoise(image_shape, text_shape,targets,clip_images.device)
+            targets = targets.repeat(2, 1, 1)
             # print(f"image_noise: {image_noise.shape}")
             # print(f"text_noise: {text_noise.shape}")
 
+            # print(f"image_noise{image_noise}")
+            # print(f"text_noise{text_noise}")
+
+            # print("image")
+            self.layers = []
             clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True,
                                                                                 noise=image_noise)
+            res4A, res5A = self.get_res45()
+
+            self.layers = []
+            clip_featuresB = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
+            res4B, res5B = self.get_res45()
+
+            res4 = torch.cat([res4A, res4B], dim=0)
+            res5 = torch.cat([res5A, res5B], dim=0)
+            clip_features = torch.cat((clip_features, clip_featuresB), dim=0)
+            # print("text")
         else:
             clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)
+            res4, res5 = self.get_res45()
         # print(f"image_noise{image_noise.shape}")
         # print(f"text_noise{text_noise.shape}")
 
@@ -179,19 +196,16 @@ class CATSeg(nn.Module):
         # CLIP ViT features for guidance
         res3 = rearrange(image_features, "B (H W) C -> B C H W", H=24)
         # (1,512, 24, 24)
-        res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
-        res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
-        res4 = self.upsample1(res4)
-        # (1,256,48,48)
-        res5 = self.upsample2(res5)
-        # (1, 128,96,96)
+
         features = {'res5': res5, 'res4': res4, 'res3': res3,}
 
+        # print(f"res4{res4.shape}")
+        # print(f"res5{res5.shape}")
 
         if self.training:
 
-            outputs = self.sem_seg_head(clip_features, features,text_noise=text_noise)
-
+            outputs,loss1 = self.sem_seg_head(clip_features, features,text_noise=text_noise, targets=targets)
+            # print(outputs.shape)
             outputs = F.interpolate(outputs, size=(targets.shape[-2], targets.shape[-1]), mode="bilinear", align_corners=False)
 
             num_classes = outputs.shape[1]
@@ -203,6 +217,15 @@ class CATSeg(nn.Module):
             _targets[mask] = _onehot
 
             loss = F.binary_cross_entropy_with_logits(outputs, _targets)
+
+            self.save(loss, "loss.txt")
+            self.save(loss1, "loss1.txt")
+            loss+= loss1
+            file_name = 'loss.txt'
+
+            # 以追加模式打开文件
+
+
             # print(f"loss: {loss}")
             losses = {"loss_sem_seg" :  loss}
 
@@ -218,6 +241,18 @@ class CATSeg(nn.Module):
             processed_results = [{'sem_seg': output}]
             return processed_results
 
+    def save(self, num, filename):
+        with open(filename, 'a') as file:
+            file.write(f"{num}\n")  # 追加数并换行
+
+    def get_res45(self):
+        res4 = rearrange(self.layers[0][1:, :, :], "(H W) B C -> B C H W", H=24)
+        res5 = rearrange(self.layers[1][1:, :, :], "(H W) B C -> B C H W", H=24)
+        res4 = self.upsample1(res4)
+        # (1,256,48,48)
+        res5 = self.upsample2(res5)
+        # (1, 128,96,96)
+        return res4, res5
 
     @torch.no_grad()
     def inference_sliding_window(self, batched_inputs, kernel=384, overlap=0.333, out_res=[640, 640]):

@@ -21,7 +21,7 @@ class AddNoise(nn.Module):
         super().__init__()
 
         self.mean = 0.0  # 高斯噪声的均值
-        self.stddev = 0.0005  # 高斯噪声的标准差
+        self.stddev = 0.1  # 高斯噪声的标准差
         # self.cfg = cfg
         # self.addapter = nn.Sequential(
         #     nn.Conv2d(prompt_channel, appearance_guidance_proj_dim, kernel_size=3, stride=1, padding=1),
@@ -40,6 +40,9 @@ class AddNoise(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
         )
         self.Con3 = nn.Conv2d(in_channels=1, out_channels=77, kernel_size=(1, 1))
+        self.ConvNoiseToImage = nn.Sequential(
+            nn.Conv1d(in_channels=768, out_channels=768, kernel_size=3, padding=1)
+        )
         # self.conv = nn.ModuleList([
         #     nn.Sequential(
         #         nn.Conv2d(image_channel, appearance_guidance_dims[0], kernel_size=3, stride=1, padding=1),
@@ -140,19 +143,13 @@ class AddNoise(nn.Module):
         # 4, 77, 171, 512
         del targets, mask, new_mask
         return noise
-    def caculateNan(self,index, mask):
-        for i in range(len(index)):
-            for j in range(len(index[i])):
-                idx = index[i][j]
-                self.nanClass[0][idx] += 1
-                if mask[i][idx] == 0:
-                    self.nanClass[1][idx] += 1
 
+    def NoiseToImage(self, noise ):
+        image_noise = self.ConvNoiseToImage
+        return image_noise(noise)
 
     def getnoise(self, shape, device):
         noise = torch.normal(self.mean, self.stddev, shape, device=device,dtype=torch.float32)
-
-
         return  noise
 
     def forward(self,  image_shape, text_shape, targets, device):
@@ -171,8 +168,8 @@ class AddNoise(nn.Module):
 
         # Ori_corr = self.correlation(image_features, text_features)
         #
-
-        image_noise = self.getnoise(image_shape, device) # B T P C
+        noise = self.getnoise(image_shape, device)
+        image_noise = self.NoiseToImage(noise) # B T P C
 
         text_noise = self.NoiseToText(text_shape,image_noise, targets, device)
 

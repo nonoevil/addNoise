@@ -718,7 +718,10 @@ class Aggregator(nn.Module):
         for layer in self.layers:
             corr_embed = layer(corr_embed, projected_guidance, projected_text_guidance)
 
+        # print(f"corr{corr_embed.shape}")
+
         logit = self.conv_decoder(corr_embed, projected_decoder_guidance)
+        # print(f"logit{logit.shape}")
         if classes is not None:
             out = torch.full((logit.size(0), orig_clases, logit.size(2), logit.size(3)), -100., device=logit.device)
             out.scatter_(dim=1, index=classes[..., None, None].expand(-1, -1, logit.size(-2), logit.size(-1)), src=logit)

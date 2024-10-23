@@ -254,6 +254,7 @@ class Transformer(nn.Module):
 
             if i == 3:
                 if noise is not None:
+                    # print(x)
                     x = resblock(x, self.prompt_length,noise=noise)
                 else :
                     x = resblock(x, self.prompt_length)
