@@ -180,7 +180,7 @@ class CATSeg(nn.Module):
 
             res4 = torch.cat([res4A, res4B], dim=0)
             res5 = torch.cat([res5A, res5B], dim=0)
-            clip_features = torch.cat((clip_features, clip_featuresB), dim=0)
+            clip_features = torch.cat((clip_featuresB, clip_features), dim=0)
             # print("text")
         else:
             clip_features = self.sem_seg_head.predictor.clip_model.encode_image(clip_images_resized, dense=True)

@@ -181,9 +181,8 @@ class CATSegPredictor(nn.Module):
         image= image.unsqueeze(1).expand(-1, text.shape[1], -1, -1, -1)
         # (4, 171, 512, 24, 24)
 
-        print(f"")
         mask = self.get_mask(targets, image.shape, image.device)
-        print(f"mask{mask.shape}")
+
         nan_id, Nonan_id = self.nanId(mask, targets)
 
         textB = text.squeeze(2)
